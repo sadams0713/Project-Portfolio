@@ -1,0 +1,176 @@
+[HttpPut("Endpoint for Approval ")]
+        public async Task<IActionResult> ApprovePurchaseOrder(long iid, [FromBody] PurchaseOrderApprovalDto approvalDto)
+        {
+            _logger.LogInformation($"Received PM Approval for PO: {iid}, Data: {JsonConvert.SerializeObject(approvalDto)}");
+
+            var purchaseOrder = await _context.TblPurchaseOrders.FindAsync(iid);
+
+            if (purchaseOrder == null)
+            {
+                _logger.LogWarning($"Purchase Order with ID {iid} not found.");
+                return NotFound();
+            }
+
+            purchaseOrder.YsnApproved = approvalDto.YsnApproved;
+            purchaseOrder.YsnGMApproved = approvalDto.YsnApproved;
+            purchaseOrder.DtmApproved = DateTime.Now;
+            purchaseOrder.DtmGMApproved = DateTime.Now;
+            purchaseOrder.StrPurchaseManager = approvalDto.StrPurchaseManager;
+            purchaseOrder.StrApprovedBy = approvalDto.StrPurchaseManager;
+
+
+            _context.TblPurchaseOrders.Update(purchaseOrder);
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation($"Updated purchase order: {purchaseOrder.StrPonumber}, YsnApproved: {purchaseOrder.YsnApproved}, YsnGMApproved: {purchaseOrder.YsnGMApproved}");
+
+            if (purchaseOrder.YsnUrgent == true && purchaseOrder.YsnApproved == true)
+            {
+                _logger.LogInformation($"Sending urgent PO approval email for {purchaseOrder.StrPonumber}");
+
+                List<string> recipients = new List<string>();
+
+                if (purchaseOrder.YsnUSDMX == true  && purchaseOrder.DecPototal >= 500 && purchaseOrder.DecPototal < 5000  && purchaseOrder.IdTblDepartment == 5)
+                {
+                    {{Recipient Group Here}}
+                }
+
+                if (purchaseOrder.YsnUSDMX == true && purchaseOrder.DecPototal >= 500 && purchaseOrder.DecPototal < 5000 && purchaseOrder.IdTblDepartment != 5)
+                {
+                    {{Recipient Group Here}}
+
+                }
+                if (purchaseOrder.YsnUSDMX == true && purchaseOrder.DecPototal >= 5000)
+                {
+                    {{Recipient Group Here}};
+
+                }
+
+                if (recipients.Count > 0)
+                {
+                    string poLink = $"LINK HERE";
+                    string subject = $"Purchase Order {purchaseOrder.StrPonumber} Has Been Approved";
+                    string body = $@"
+                <h3>A Purchase Order Has Been Approved.</h3>
+                <p><strong>PO Number:</strong> <a href='{poLink}'>{purchaseOrder.StrPonumber}</a> has been approved by {purchaseOrder.StrPurchaseManager}.</p>
+                <p><strong>Created By:</strong> {purchaseOrder.StrCreatedBy}</p>
+                <p><strong>Total Amount:</strong> ${purchaseOrder.DecPototal:F2}</p>
+                <p>*Note: This link will only work on the Woodworth network.</p>";
+
+                    await _emailService.SendEmailAsync(recipients, subject, body);
+                    _logger.LogInformation($"Urgent email sent to: {string.Join(", ", recipients)}");
+                }
+            }
+
+            if (purchaseOrder.YsnApproved == true && purchaseOrder.YsnGMApproved == true)
+            {
+                _logger.LogInformation("Calling SendApprovalNotification.");
+                await SendApprovalNotification(purchaseOrder);
+            }
+
+            return NoContent();
+        }
+
+        [HttpPut("Secondary Approval Endpoint")]
+        public async Task<IActionResult> gmApproval(long iid, [FromBody] GMApprovalDto approvalDto)
+        {
+            _logger.LogInformation($"Received GM Approval for PO: {iid}, Data: {JsonConvert.SerializeObject(approvalDto)}");
+
+            var purchaseOrder = await _context.TblPurchaseOrders.FindAsync(iid);
+
+            if (purchaseOrder == null)
+            {
+                _logger.LogWarning($"Purchase Order with ID {iid} not found.");
+                return NotFound();
+            }
+
+            purchaseOrder.YsnGMApproved = approvalDto.YsnGMApproved;
+            purchaseOrder.YsnApproved = approvalDto.YsnGMApproved;
+            purchaseOrder.DtmApproved = DateTime.Now;
+            purchaseOrder.DtmGMApproved = DateTime.Now;
+            purchaseOrder.StrApprovedBy = approvalDto.StrApprovedBy;
+
+
+            _context.TblPurchaseOrders.Update(purchaseOrder);
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation($"Updated purchase order: {purchaseOrder.StrPonumber}, YsnApproved: {purchaseOrder.YsnApproved}, YsnGMApproved: {purchaseOrder.YsnGMApproved}");
+
+            if (purchaseOrder.YsnApproved == true && purchaseOrder.YsnGMApproved == true)
+            {
+                _logger.LogInformation("Calling SendApprovalNotification.");
+                await SendApprovalNotification(purchaseOrder);
+            }
+
+            return NoContent();
+        }
+
+        private async Task SendApprovalNotification(TblPurchaseOrder purchaseOrder)
+        {
+
+            string? creatorEmail = await GetUserEmailFromAD(purchaseOrder.StrCreatedBy);
+
+            if (!string.IsNullOrEmpty(creatorEmail))
+            {
+                var supplierName = await _context.TblSuppliers
+                    .Where(s => s.Iid == purchaseOrder.IdTblSupplier)
+                    .Select(s => s.StrSupplier)
+                    .FirstOrDefaultAsync() ?? "Unknown Supplier";
+
+                string poLink = $"LINK HERE";
+                string subject = $"Your Purchase Order {purchaseOrder.StrPonumber} has been Approved";
+
+                string body = $@"
+            <h3>Your Purchase Order has been Approved</h3>
+            <table border='1' cellpadding='8' cellspacing='0' style='border-collapse: collapse; width: 80%;'>
+                <tr style='background-color: #f2f2f2;'>
+                    <th style='text-align: left;'>Field</th>
+                    <th style='text-align: left;'>Details</th>
+                </tr>
+                <tr>
+                    <td><strong>PO Number</strong></td>
+                    <td>{purchaseOrder.StrPonumber}</td>
+                </tr>
+                <tr>
+                    <td><strong>Supplier</strong></td>
+                    <td>{supplierName}</td>
+                </tr>
+                <tr>
+                    <td><strong>Total Amount</strong></td>
+                    <td>${purchaseOrder.DecPototal:F2}</td>
+                </tr>
+                <tr>
+                    <td><strong>Status</strong></td>
+                    <td>Approved</td>
+                </tr>
+            </table>
+             ";
+                await _emailService.SendEmailAsync(creatorEmail, subject, body);
+            }
+            else
+            {
+                _logger.LogWarning($"No email found for creator: {purchaseOrder.StrCreatedBy}. Skipping email.");
+            }
+        }
+
+        private async Task<string?> GetUserEmailFromAD(string fullName)
+        {
+            string[] nameParts = fullName.Split(' ', 2);
+            if (nameParts.Length < 2)
+            {
+                return null;
+            }
+
+            string firstName = nameParts[0];
+            string lastName = nameParts[1];
+
+            using var scope = _serviceScopeFactory.CreateScope();
+            var _context = scope.ServiceProvider.GetRequiredService<InventoryTestContext>();
+
+            var userEmail = await _context.TblUsers
+                .Where(u => u.StrFirstName == firstName && u.StrLastName == lastName)
+                .Select(u => u.StrEmail)
+                .FirstOrDefaultAsync();
+
+            return userEmail;
+        }
