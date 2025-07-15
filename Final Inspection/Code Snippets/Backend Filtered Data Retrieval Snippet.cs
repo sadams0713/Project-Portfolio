@@ -1,4 +1,4 @@
-//**Requests to get Loads and Data By Name. Please Excuse any discrepancies or inconsistencies you find with aliases, tables, etc. **//
+//**Requests to get Data By Specific parameters. **//
 
 [ApiController]
 [Route("api/records")]
