@@ -4,84 +4,106 @@
  */
 
 
-onFileSelected(event: any): void {
-  const newFiles: File[] = Array.from(event.target.files);
-  if (!newFiles || newFiles.length === 0) return;
-  
-  this.selectedFiles = newFiles;
-  this.fileUploadSaveAsDraft();
+onFileDrop(event: any): void {
+  const incomingFiles: File[] = Array.from(event.target.files);
+  if (!incomingFiles || incomingFiles.length === 0) return;
 
-  this.uploadedFiles.push(...newFiles.map(file => ({
-    iid: 0,
-    fileName: file.name,
-    filePath: '',
-    url: `{{filepath_here}}/${this.purchaseOrder.iid}/${file.name}` // Consider masking full URL
-  })));
+  // Store selected files in a temporary local array
+  this.localFiles = incomingFiles;
+
+  // Save the rest of the draft entry
+  this.cacheTempEntry();
+
+  // Update the UI list of files with metadata for display or tracking
+  this.fileManifest.push(
+    ...incomingFiles.map(file => ({
+      id: 0, // Placeholder ID for unsaved files
+      name: file.name,
+      path: '',
+      link: `{{filepath_here}}/${this.dataModel.id}/${file.name}` // Will be replaced with real path after upload
+    }))
+  );
 }
 
+// Saves the current form values as a draft to the backend
+cacheTempEntry(): void {
+  // Helper: returns 0 if value is null or undefined
+  const defaultToZero = (val: any) => val != null ? val : 0;
 
-fileUploadSaveAsDraft(): void {
-    const setNullToZero = (value: any) => value != null ? value : 0;
-    const setNullToEmptyString = (value: any): string => value != null ? value : '';
-    const setNullToFalse = (value: any): boolean => value != null ? value : false;
-    this.purchaseOrder.originalDraftPoNumber = this.generatedPONumber;
+  // Helper: returns empty string if value is null or undefined
+  const defaultToString = (val: any): string => val != null ? val : '';
 
+  // Helper: returns false if value is null or undefined
+  const defaultToBool = (val: any): boolean => val != null ? val : false;
 
-    this.purchaseOrder.dtmCreated = new Date();
-    this.purchaseOrder.strPonumber = setNullToEmptyString(this.purchaseOrder.strPonumber);
-    this.purchaseOrder.idTblSupplier = this.selectedSupplier?.iid || 0;
-    this.purchaseOrder.idTblContact = this.selectedContact?.iid || 0;
-    this.purchaseOrder.dtmDue = this.purchaseOrder.dtmDue || new Date();
-    this.purchaseOrder.strPayment = setNullToEmptyString(this.purchaseOrder.strPayment);
-    this.purchaseOrder.strCreatedBy = setNullToEmptyString(this.userDetails?.commonName);
-    this.purchaseOrder.strShipping = setNullToEmptyString(this.purchaseOrder.strShipping);
-    this.purchaseOrder.idTblDepartment = this.purchaseOrder.idTblDepartment || 0;
-    this.purchaseOrder.ysnConfirmation = setNullToFalse(this.purchaseOrder.ysnConfirmation);
-    this.purchaseOrder.strConfirmation = setNullToEmptyString(this.purchaseOrder.strConfirmation);
-    this.purchaseOrder.strUsoCfdi = setNullToEmptyString(this.purchaseOrder.strUsoCfdi);
-    this.purchaseOrder.ysnUrgent = setNullToFalse(this.purchaseOrder.ysnUrgent);
+  // Set a reference code (i.e., draft number) for this temporary entry
+  this.dataModel.fallbackCode = this.tempReferenceCode;
 
-    this.purchaseOrder.decFreight = setNullToZero(this.purchaseOrder.decFreight);
-    this.purchaseOrder.decDiscount = setNullToZero(this.purchaseOrder.decDiscount);
-    this.purchaseOrder.decTax = setNullToZero(this.purchaseOrder.decTax);
-    this.purchaseOrder.decSubtotal = setNullToZero(this.purchaseOrder.decSubtotal);
-    this.purchaseOrder.decPototal = setNullToZero(this.purchaseOrder.decPototal);
+  // Set creation timestamp
+  this.dataModel.createdOn = new Date();
 
-    this.purchaseOrder.decIVAWithholding = this.purchaseOrder.ysnIVAWithholding
-      ? this.withholdingPercentage || 0
-      : 0;
+  // Normalize and assign general properties
+  this.dataModel.referenceCode = defaultToString(this.dataModel.referenceCode);
+  this.dataModel.vendorId = this.chosenVendor?.id || 0;
+  this.dataModel.contactId = this.chosenContact?.id || 0;
+  this.dataModel.dueDate = this.dataModel.dueDate || new Date();
+  this.dataModel.paymentTerms = defaultToString(this.dataModel.paymentTerms);
+  this.dataModel.initiator = defaultToString(this.userInfo?.commonName);
+  this.dataModel.shippingNotes = defaultToString(this.dataModel.shippingNotes);
+  this.dataModel.divisionId = this.dataModel.divisionId || 0;
+  this.dataModel.confirmed = defaultToBool(this.dataModel.confirmed);
+  this.dataModel.confirmationDetails = defaultToString(this.dataModel.confirmationDetails);
+  this.dataModel.priorityFlag = defaultToBool(this.dataModel.priorityFlag);
 
-    this.purchaseOrder.decISRWithholding = this.purchaseOrder.ysnISRWithholding
-      ? this.withholdingPercentage2 || 0
-      : 0;
+  // Normalize and assign financials
+  this.dataModel.shippingAmount = defaultToZero(this.dataModel.shippingAmount);
+  this.dataModel.discountAmount = defaultToZero(this.dataModel.discountAmount);
+  this.dataModel.taxAmount = defaultToZero(this.dataModel.taxAmount);
+  this.dataModel.subtotalAmount = defaultToZero(this.dataModel.subtotalAmount);
+  this.dataModel.totalAmount = defaultToZero(this.dataModel.totalAmount);
 
-    this.purchaseOrder.lineItems = this.items
-      .filter(item => item.quantity && item.partName)
-      .map(item => ({
-        decQuantity: setNullToZero(item.quantity),
-        strUnit: setNullToEmptyString(item.unit),
-        strPartNumber: setNullToEmptyString(item.partNumber),
-        strPartName: setNullToEmptyString(item.partName),
-        strDescription: setNullToEmptyString(item.description),
-        decUnitPrice: setNullToZero(item.unitPrice),
-        decTotalUnitPrice: setNullToZero(item.quantity) * setNullToZero(item.unitPrice),
-        ysnTax: setNullToFalse(item.tax)
-      }));
+  // Conditional tax withholdings
+  this.dataModel.ivaHoldback = this.dataModel.hasIvaHoldback
+    ? this.ivaRate || 0
+    : 0;
 
-    this.poFormService.savePurchaseOrderDraft(this.purchaseOrder).subscribe(
-      (response: any) => {
-        console.log('Draft saved!', response);
+  this.dataModel.isrHoldback = this.dataModel.hasIsrHoldback
+    ? this.isrRate || 0
+    : 0;
 
-        if (!this.purchaseOrder.iid && response?.draftIid) {
-          this.purchaseOrder.iid = response.draftIid;
-          this.purchaseOrder.originalDraftPoNumber = this.generatedPONumber;
-        }
-        if (this.selectedFiles?.length > 0) {
-          this.uploadDraftFiles(this.purchaseOrder.iid);
-        }
-      },
-      error => {
-        console.error('Error saving draft:', error);
+  // Process and normalize each line item before saving
+  this.dataModel.details = this.itemList
+    .filter(item => item.quantity && item.label) // Only include valid items
+    .map(item => ({
+      quantity: defaultToZero(item.quantity),
+      unitType: defaultToString(item.unit),
+      partId: defaultToString(item.partNumber),
+      label: defaultToString(item.label),
+      notes: defaultToString(item.notes),
+      rate: defaultToZero(item.unitPrice),
+      total: defaultToZero(item.quantity) * defaultToZero(item.unitPrice),
+      taxed: defaultToBool(item.tax)
+    }));
+
+  // Save draft to backend API
+  this.formService.saveDraft(this.dataModel).subscribe(
+    (result: any) => {
+      console.log('Draft saved successfully!', result);
+
+      // If no ID exists (first save), assign returned draft ID
+      if (!this.dataModel.id && result?.draftId) {
+        this.dataModel.id = result.draftId;
+        this.dataModel.fallbackCode = this.tempReferenceCode;
       }
-    );
-  }
+
+      // If files were selected, begin file upload process
+      if (this.localFiles?.length > 0) {
+        this.pushDraftFiles(this.dataModel.id);
+      }
+    },
+    error => {
+      // Handle backend save error
+      console.error('Failed to save draft:', error);
+    }
+  );
+}
